@@ -6,21 +6,26 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import matplotlib.animation as animation
-
-
+  
+from scipy.ndimage import gaussian_filter
+# ---------------------------
+# Load Sentinel Bands
+# ---------------------------
 # ---------------------------
 # Load Sentinel Bands
 # ---------------------------
 def load_bands():
 
-    dataset = rasterio.open("data/B02.tif")
+    dataset = rasterio.open("Browser_images/B02.tiff")
 
-    b2 = rasterio.open("data/B02.tif").read(1)
-    b3 = rasterio.open("data/B03.tif").read(1)
-    b4 = rasterio.open("data/B04.tif").read(1)
-    b8 = rasterio.open("data/B08.tif").read(1)
+    b2 = rasterio.open("Browser_images/B02.tiff").read(1)
+    b3 = rasterio.open("Browser_images/B03.tiff").read(1)
+    b4 = rasterio.open("Browser_images/B04.tiff").read(1)
+    b8 = rasterio.open("Browser_images/B08.tiff").read(1)
 
     return dataset, b2, b3, b4, b8
+
+  
 
 
 # ---------------------------
@@ -69,7 +74,9 @@ def train_model(features, ndvi):
 
     X = features.reshape(-1, 10)
 
-    labels = (psi > np.percentile(psi, 75)).astype(int)
+    threshold = np.mean(psi)
+
+    labels = (psi > threshold).astype(int)
 
     y = labels.flatten()
 
@@ -101,15 +108,27 @@ def generate_heatmap(model, features, b2):
 
     X = features.reshape(-1, 10)
 
-    probabilities = model.predict_proba(X)[:, 1]
+    probabilities = model.predict_proba(X)
+
+    if probabilities.shape[1] > 1:
+        probabilities = probabilities[:,1]
+    else:
+        probabilities = probabilities[:,0]
 
     heatmap = probabilities.reshape(b2.shape)
+
+    # Smooth the heatmap
+    heatmap = gaussian_filter(heatmap, sigma=3)
+
+    plt.figure(figsize=(8,6))
 
     plt.imshow(heatmap, cmap="hot")
 
     plt.title("Pathogen Detection Heatmap")
 
-    plt.colorbar()
+    plt.colorbar(label="Pathogen Probability")
+
+    plt.axis("off")
 
     plt.show()
 
@@ -121,33 +140,25 @@ def generate_heatmap(model, features, b2):
 # ---------------------------
 # Location Based Detection
 # ---------------------------
-def detect_location(model, dataset, features):
-
-    geolocator = Nominatim(user_agent="pathowatch")
-
-    location_name = input("\nEnter location: ")
-
-    location = geolocator.geocode(location_name)
-
-    if location is None:
-
-        print("Location not found")
-
-        return None, None
-
-    lat = location.latitude
-    lon = location.longitude
-
-    print("Latitude:", lat)
-    print("Longitude:", lon)
+def detect_location(model, dataset, features, b2, b3, b4, b8, lat, lon):
 
     row, col = dataset.index(lon, lat)
 
     pixel = features[row, col].reshape(1, -1)
 
-    probability = model.predict_proba(pixel)[0][1]
+    probability = model.predict_proba(pixel)
 
-    print("\nPathogen probability:", probability)
+    if probability.shape[1] > 1:
+        probability = probability[0][1]
+    else:
+        probability = probability[0][0]
+
+    bands = [
+        float(b2[row, col]),
+        float(b3[row, col]),
+        float(b4[row, col]),
+        float(b8[row, col])
+    ]
 
     if probability > 0.7:
         risk = "HIGH"
@@ -156,10 +167,11 @@ def detect_location(model, dataset, features):
     else:
         risk = "LOW"
 
-    print("Risk Level:", risk)
-
-    return row, col
-
+    return {
+        "probability": float(probability),
+        "risk": risk,
+        "bands": bands
+    }
 
 # ---------------------------
 # Spectral Signature Graph
@@ -225,13 +237,20 @@ def main():
 
     heatmap = generate_heatmap(model, features, b2)
 
-    row, col = detect_location(model, dataset, features)
+    print("Model ready")
 
-    if row is not None:
+    return model, dataset, features, b2, b3, b4, b8
 
-        spectral_graph(b2, b3, b4, b8, row, col)
 
-    spread_animation(heatmap)
+def load_model_system():
+
+    dataset, b2, b3, b4, b8 = load_bands()
+
+    features, ndvi = extract_features(b2, b3, b4, b8)
+
+    model = train_model(features, ndvi)
+
+    return model, dataset, features, b2, b3, b4, b8
 
 
 # ---------------------------
