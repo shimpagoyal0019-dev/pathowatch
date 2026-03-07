@@ -8,6 +8,7 @@ from sklearn.metrics import classification_report
 import matplotlib.animation as animation
   
 from scipy.ndimage import gaussian_filter
+from sklearn.cluster import DBSCAN
 # ---------------------------
 # Load Sentinel Bands
 # ---------------------------
@@ -117,14 +118,34 @@ def generate_heatmap(model, features, b2):
 
     heatmap = probabilities.reshape(b2.shape)
 
-    # Smooth the heatmap
+    # smooth the heatmap
     heatmap = gaussian_filter(heatmap, sigma=3)
+
+    # detect high risk pixels
+    threshold = np.percentile(heatmap, 85)
+
+    high_risk = heatmap > threshold
+
+    coords = np.column_stack(np.where(high_risk))
+
+    if len(coords) > 0:
+
+        clustering = DBSCAN(eps=5, min_samples=20).fit(coords)
+
+        cluster_map = np.zeros_like(heatmap)
+
+        for (r, c), label in zip(coords, clustering.labels_):
+
+            if label != -1:
+                cluster_map[r, c] = heatmap[r, c]
+
+        heatmap = gaussian_filter(cluster_map, sigma=5)
 
     plt.figure(figsize=(8,6))
 
     plt.imshow(heatmap, cmap="hot")
 
-    plt.title("Pathogen Detection Heatmap")
+    plt.title("Pathogen Outbreak Heatmap")
 
     plt.colorbar(label="Pathogen Probability")
 
@@ -135,7 +156,6 @@ def generate_heatmap(model, features, b2):
     plt.imsave("heatmap.png", heatmap, cmap="hot")
 
     return heatmap
-
 
 # ---------------------------
 # Location Based Detection
