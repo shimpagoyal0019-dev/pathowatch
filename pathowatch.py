@@ -1,8 +1,6 @@
 import rasterio
 import numpy as np
 import matplotlib.pyplot as plt
-import ee
-import geemap
 from geopy.geocoders import Nominatim
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -11,44 +9,16 @@ import matplotlib.animation as animation
 
 
 # ---------------------------
-# Download Sentinel Image
+# Load Sentinel Bands
 # ---------------------------
-def download_satellite():
+def load_bands():
 
-    point = ee.Geometry.Point([77.2090, 28.6139])
+    dataset = rasterio.open("data/B02.tif")
 
-    collection = (
-        ee.ImageCollection("COPERNICUS/S2_SR")
-        .filterBounds(point)
-        .filterDate("2023-01-01", "2023-12-31")
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
-    )
-
-    image = collection.first()
-
-    bands = image.select(["B2", "B3", "B4", "B8"])
-
-    geemap.ee_export_image(
-        bands,
-        filename="sentinel.tif",
-        scale=10,
-        region=point.buffer(5000)
-    )
-
-    return "sentinel.tif"
-
-
-# ---------------------------
-# Load Bands
-# ---------------------------
-def load_bands(filename):
-
-    dataset = rasterio.open(filename)
-
-    b2 = dataset.read(1)
-    b3 = dataset.read(2)
-    b4 = dataset.read(3)
-    b8 = dataset.read(4)
+    b2 = rasterio.open("data/B02.tif").read(1)
+    b3 = rasterio.open("data/B03.tif").read(1)
+    b4 = rasterio.open("data/B04.tif").read(1)
+    b8 = rasterio.open("data/B08.tif").read(1)
 
     return dataset, b2, b3, b4, b8
 
@@ -59,21 +29,28 @@ def load_bands(filename):
 def extract_features(b2, b3, b4, b8):
 
     ndvi = (b8 - b4) / (b8 + b4 + 1e-10)
+
     ndwi = (b3 - b8) / (b3 + b8 + 1e-10)
 
     spectral_slope = (b8 - b2) / (b8 + b2 + 1e-10)
 
     absorption_depth = np.minimum.reduce([b2, b3, b4, b8])
 
-    spectral_variance = np.var(np.stack([b2, b3, b4, b8], axis=0), axis=0)
+    spectral_variance = np.var(
+        np.stack([b2, b3, b4, b8], axis=0), axis=0
+    )
 
     spectral_gradient = np.gradient(
         np.stack([b2, b3, b4, b8], axis=0), axis=0
     )[0]
 
     features = np.stack([
-        b2, b3, b4, b8,
-        ndvi, ndwi,
+        b2,
+        b3,
+        b4,
+        b8,
+        ndvi,
+        ndwi,
         absorption_depth,
         spectral_variance,
         spectral_slope,
@@ -84,7 +61,7 @@ def extract_features(b2, b3, b4, b8):
 
 
 # ---------------------------
-# Train ML Model
+# Train Machine Learning Model
 # ---------------------------
 def train_model(features, ndvi):
 
@@ -118,7 +95,7 @@ def train_model(features, ndvi):
 
 
 # ---------------------------
-# Generate Heatmap
+# Generate Pathogen Heatmap
 # ---------------------------
 def generate_heatmap(model, features, b2):
 
@@ -129,8 +106,11 @@ def generate_heatmap(model, features, b2):
     heatmap = probabilities.reshape(b2.shape)
 
     plt.imshow(heatmap, cmap="hot")
+
     plt.title("Pathogen Detection Heatmap")
+
     plt.colorbar()
+
     plt.show()
 
     plt.imsave("heatmap.png", heatmap, cmap="hot")
@@ -139,7 +119,7 @@ def generate_heatmap(model, features, b2):
 
 
 # ---------------------------
-# Detect Pathogen at Location
+# Location Based Detection
 # ---------------------------
 def detect_location(model, dataset, features):
 
@@ -150,7 +130,9 @@ def detect_location(model, dataset, features):
     location = geolocator.geocode(location_name)
 
     if location is None:
+
         print("Location not found")
+
         return None, None
 
     lat = location.latitude
@@ -180,7 +162,7 @@ def detect_location(model, dataset, features):
 
 
 # ---------------------------
-# Spectral Graph
+# Spectral Signature Graph
 # ---------------------------
 def spectral_graph(b2, b3, b4, b8, row, col):
 
@@ -209,7 +191,7 @@ def spectral_graph(b2, b3, b4, b8, row, col):
 
 
 # ---------------------------
-# Spread Animation
+# Pathogen Spread Animation
 # ---------------------------
 def spread_animation(heatmap):
 
@@ -218,7 +200,10 @@ def spread_animation(heatmap):
     frames = []
 
     for i in range(5):
-        frames.append([plt.imshow(heatmap, cmap="hot", animated=True)])
+
+        frames.append(
+            [plt.imshow(heatmap, cmap="hot", animated=True)]
+        )
 
     ani = animation.ArtistAnimation(fig, frames, interval=800)
 
@@ -232,12 +217,7 @@ def spread_animation(heatmap):
 # ---------------------------
 def main():
 
-    ee.Authenticate()
-    ee.Initialize()
-
-    filename = download_satellite()
-
-    dataset, b2, b3, b4, b8 = load_bands(filename)
+    dataset, b2, b3, b4, b8 = load_bands()
 
     features, ndvi = extract_features(b2, b3, b4, b8)
 
@@ -248,6 +228,7 @@ def main():
     row, col = detect_location(model, dataset, features)
 
     if row is not None:
+
         spectral_graph(b2, b3, b4, b8, row, col)
 
     spread_animation(heatmap)
@@ -257,4 +238,5 @@ def main():
 # Run Script
 # ---------------------------
 if __name__ == "__main__":
+
     main()
