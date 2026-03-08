@@ -18,6 +18,7 @@ from sklearn.cluster import DBSCAN
 def load_bands():
 
     dataset = rasterio.open("Browser_images/B02.tiff")
+    print(dataset.bounds)
 
     b2 = rasterio.open("Browser_images/B02.tiff").read(1)
     b3 = rasterio.open("Browser_images/B03.tiff").read(1)
@@ -25,6 +26,7 @@ def load_bands():
     b8 = rasterio.open("Browser_images/B08.tiff").read(1)
 
     return dataset, b2, b3, b4, b8
+
 
   
 
@@ -163,6 +165,13 @@ def generate_heatmap(model, features, b2):
 def detect_location(model, dataset, features, b2, b3, b4, b8, lat, lon):
 
     row, col = dataset.index(lon, lat)
+
+    height, width = features.shape[:2]
+
+    if row < 0 or row >= height or col < 0 or col >= width:
+        return {
+            "error": "Location outside satellite image coverage"
+        }
 
     pixel = features[row, col].reshape(1, -1)
 
